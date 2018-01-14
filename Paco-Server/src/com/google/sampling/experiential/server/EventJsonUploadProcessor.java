@@ -2,7 +2,6 @@ package com.google.sampling.experiential.server;
 
 import java.io.IOException;
 import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
@@ -28,6 +27,7 @@ import com.pacoapp.paco.shared.comm.Outcome;
 import com.pacoapp.paco.shared.model2.ExperimentDAO;
 import com.pacoapp.paco.shared.model2.Input2;
 import com.pacoapp.paco.shared.model2.JsonConverter;
+import com.pacoapp.paco.shared.util.ErrorMessages;
 import com.pacoapp.paco.shared.util.ExperimentHelper;
 
 public class EventJsonUploadProcessor {
@@ -47,14 +47,24 @@ public class EventJsonUploadProcessor {
   }
 
   public String processJsonEvents(String postBodyString, String whoFromLogin, String appIdHeader, String pacoVersion) {
+    //This is the traditional event processing call to insert to data store.
+    //This call is not from insertCloudSQl flow, where we will persist this info in cloud sql. So, we send the flagfalse
+    boolean persistInCloudSqlOnly = false;
+    return processJsonEvents(persistInCloudSqlOnly, postBodyString, whoFromLogin, appIdHeader, pacoVersion);
+  }
+
+  public String processJsonEvents(boolean persistInCloudSqlOnly, String postBodyString, String whoFromLogin, String appIdHeader, String pacoVersion) {
+    String eventInJsonFormat=null;
     try {
       if (postBodyString.startsWith("[")) {
         final JSONArray events = new JSONArray(postBodyString);
-        return toJson(processJsonArray(events, whoFromLogin, appIdHeader, pacoVersion));
+        eventInJsonFormat = toJson(processJsonArray(persistInCloudSqlOnly, events, whoFromLogin, appIdHeader, pacoVersion));
       } else {
         final JSONObject currentEvent = new JSONObject(postBodyString);
-        return toJson(processSingleJsonEvent(currentEvent, whoFromLogin, appIdHeader, pacoVersion));
+        eventInJsonFormat = toJson(processSingleJsonEvent(persistInCloudSqlOnly, currentEvent, whoFromLogin, appIdHeader, pacoVersion));
       }
+
+      return eventInJsonFormat;
     } catch (JSONException e) {
       throw new IllegalArgumentException("JSON Exception reading post data: " + e.getMessage());
     }
@@ -78,23 +88,24 @@ public class EventJsonUploadProcessor {
     }
   }
 
-  private List<Outcome> processSingleJsonEvent(JSONObject currentEvent, String whoFromLogin, String appIdHeader, String pacoVersionHeader) {
+  private List<Outcome> processSingleJsonEvent(boolean persistInCloudSql, JSONObject currentEvent, String whoFromLogin, String appIdHeader, String pacoVersionHeader) {
     List<Outcome> results = Lists.newArrayList();
     try {
-      results.add(postEvent(currentEvent, 0, whoFromLogin, appIdHeader, pacoVersionHeader));
+      results.add(postEvent(persistInCloudSql, currentEvent, 0, whoFromLogin, appIdHeader, pacoVersionHeader));
     } catch (Throwable e) {
+      log.warning(ErrorMessages.GENERAL_EXCEPTION.getDescription() + ExceptionUtil.getStackTraceAsString(e));
       results.add(new Outcome(0, "Exception posting event: 0. "+ e.getMessage()));
     }
     return results;
   }
 
-  private List<Outcome> processJsonArray(JSONArray events, String whoFromLogin, String appIdHeader, String pacoVersionHeader) {
+  private List<Outcome> processJsonArray(boolean persistInCloudSqlOnly, JSONArray events, String whoFromLogin, String appIdHeader, String pacoVersionHeader) {
     List<Outcome> results = Lists.newArrayList();
     JSONObject currentEvent = null;
     for (int i = 0; i < events.length(); i++) {
       try {
         currentEvent = events.getJSONObject(i);
-        results.add(postEvent(currentEvent, i, whoFromLogin, appIdHeader, pacoVersionHeader));
+        results.add(postEvent(persistInCloudSqlOnly, currentEvent, i, whoFromLogin, appIdHeader, pacoVersionHeader));
       } catch (JSONException e) {
         results.add(new Outcome(i, "JSONException posting event: " + i + ". " + e.getMessage()));
       } catch (Throwable e) {
@@ -104,8 +115,12 @@ public class EventJsonUploadProcessor {
     return results;
   }
 
-  private Outcome postEvent(JSONObject eventJson, int eventId, String who, String appIdHeader, String pacoVersionHeader) throws Throwable {
+  private Outcome postEvent(boolean persistInCloudSqlOnly, JSONObject eventJson, int eventId, String who, String appIdHeader, String pacoVersionHeader) throws Throwable {
     Outcome outcome = new Outcome(eventId);
+    if (eventJson.has("experimentId") && eventJson.getString("experimentId").equals("5552926096359424")) {
+      // ignore daydream experiment
+      return outcome;
+    }
 
     String pacoVersion = null;
     if (eventJson.has("pacoVersion")) {
@@ -211,6 +226,11 @@ public class EventJsonUploadProcessor {
     } else {
       log.info("Found the experiment: " + experimentIdStr);
     }
+    // We retrieve the 'who' value from json, only when it's a request coming from
+    // cloud sql queue.
+    if(persistInCloudSqlOnly){
+      who = eventJson.getString("who");
+    }
 
     if (!experiment.isWhoAllowedToPostToExperiment(who)) {
       // don't give differentiated error messages in case someone is trying to discover experiment ids
@@ -219,12 +239,12 @@ public class EventJsonUploadProcessor {
       return outcome;
     }
 
-    log.info("Starting to read responses");
+//    log.info("Starting to read responses");
     Set<What> whats = Sets.newHashSet();
     List<PhotoBlob> blobs = Lists.newArrayList();
     if (eventJson.has("responses")) {
       JSONArray responses = eventJson.getJSONArray("responses");
-      log.info("There are " + responses.length() + " response objects");
+//      log.info("There are " + responses.length() + " response objects");
 
       for (int i = 0; i < responses.length(); i++) {
         JSONObject response = responses.getJSONObject(i);
@@ -235,11 +255,11 @@ public class EventJsonUploadProcessor {
         if (input == null) {
           input = ExperimentHelper.getInputWithName(experiment, name, groupName);
         }
-        if (input != null) {
-          log.info("Input name, responseType: " + input.getName() + ", " + input.getResponseType());
-        } else {
-          log.info("input is null for name, group: " + name +", " + groupName);
-        }
+//        if (input != null) {
+//          log.info("Input name, responseType: " + input.getName() + ", " + input.getResponseType());
+//        } else {
+//          log.info("input is null for name, group: " + name +", " + groupName);
+//        }
 
         String answer = null;
         if (response.has("answer")) {
@@ -256,8 +276,8 @@ public class EventJsonUploadProcessor {
           blobs.add(photoBlob);
           answer = "audioblob";
         } else if (answer != null && answer.length() >= 500) {
-          log.info("The response was too long for: " + name + ".");
-          log.info("Response was " + answer);
+//          log.info("The response was too long for: " + name + ".");
+//          log.info("Response was " + answer);
           answer = answer.substring(0, 497) + "...";
         }
 
@@ -265,7 +285,7 @@ public class EventJsonUploadProcessor {
 
       }
     } else {
-      log.info("There is no responses section for this event");
+//      log.info("There is no responses section for this event");
     }
 
     DateTimeFormatter df = org.joda.time.format.DateTimeFormat.forPattern(TimeUtil.DATETIME_FORMAT).withOffsetParsed();
@@ -274,28 +294,29 @@ public class EventJsonUploadProcessor {
       String responseTimeStr = eventJson.getString("responseTime");
       if (!responseTimeStr.equals("null") && !responseTimeStr.isEmpty()) {
         responseTime = parseDate(df, responseTimeStr);
-        log.info("Response TIME check" + responseTimeStr);
-        log.info(" = " + responseTime != null ? responseTime.toString() : "");
+//        log.info("Response TIME check" + responseTimeStr);
+//        log.info(" = " + responseTime != null ? responseTime.toString() : "");
       }
     }
     if (eventJson.has("scheduledTime")) {
       String timeStr = eventJson.getString("scheduledTime");
       if (!timeStr.equals("null") && !timeStr.isEmpty()) {
         scheduledTime = parseDate(df, timeStr);
-        log.info("Schedule TIME check" + timeStr);
-        log.info(" = " + scheduledTime != null ? scheduledTime.toString() : "");
+//        log.info("Schedule TIME check" + timeStr);
+//        log.info(" = " + scheduledTime != null ? scheduledTime.toString() : "");
       }
     }
 
 
-    log.info("Sanity check: who = " + who + ", when = "
-             + (new SimpleDateFormat(TimeUtil.DATETIME_FORMAT)).format(whenDate)
-             + ", what length = " + whats.size());
+//    log.info("Sanity check: who = " + who + ", when = "
+//             + (new SimpleDateFormat(TimeUtil.DATETIME_FORMAT)).format(whenDate)
+//             + ", what length = " + whats.size());
 
 
-    eventRetriever.postEvent(who, null, null, whenDate, appId, pacoVersion, whats, false, experimentIdStr,
+    eventRetriever.postEvent(persistInCloudSqlOnly, eventJson, who, null, null, whenDate, appId, pacoVersion, whats, false, experimentIdStr,
                                            experimentName, experimentVersion, responseTime, scheduledTime, blobs,
                                            groupName, actionTriggerId, actionTriggerSpecId, actionId);
+
     return outcome;
   }
 

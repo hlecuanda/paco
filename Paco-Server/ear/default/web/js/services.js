@@ -16,9 +16,21 @@ pacoApp.service('experimentService', ['$http', '$cacheFactory', 'util', 'config'
       saveExperiment: saveExperiment,
     });
 
-    function getExperimentList(listType, limit, cursor) {
+    function getExperimentList(listType, limit, cursor, sortName) {
       var endpoint = '/experiments?' + listType;
 
+      if (listType === "admin") {
+        if (sortName === 'title_desc') {
+          endpoint += '&sortColumn=title&sortOrder=desc';
+        } else if (sortName === 'modified_date_desc') {
+          endpoint += '&sortColumn=modified_date&sortOrder=desc';
+        } else if (sortName === 'modified_date_asc') {
+          endpoint += '&sortColumn=modified_date&sortOrder=asc';
+        } else  /*(sortName === 'title_asc') */ {
+          endpoint += '&sortColumn=title&sortOrder=asc';
+        } 
+      }
+      
       if (limit) {
         endpoint += '&limit=' + config.listPageSize;
       }
@@ -165,18 +177,20 @@ pacoApp.service('dataService', ['$http', '$timeout', '$q', 'config',
           endpoint += '&includePhotos=true';
         }
 
-        $http.get(endpoint).success(
+        $http.get(endpoint).then(
           function(data) {
 
             // JSON endpoint directly returns data. No need to ping for
             // job status.
             if (type === 'json') {
-              var json = JSON.stringify(data.events);
+              var json = JSON.stringify(data.data.events);
               defer.resolve({'data': json});
             } else {
-              jobUrl = '/jobStatus?jobId=' + data + '&cmdline=1';
+              jobUrl = '/jobStatus?jobId=' + data.data + '&cmdline=1';
               poll();
             }
+          }, function (data) {
+            console.log("Error:  " + JSON.stringify(data, null, 2));
           }
         );
 
@@ -187,14 +201,17 @@ pacoApp.service('dataService', ['$http', '$timeout', '$q', 'config',
           }
           tryCount++;
 
-          $http.get(jobUrl).success(
+          $http.get(jobUrl).then(
             function(data) {
-              if (data === 'pending\n') {
+              if (data.data === 'pending\n') {
                 $timeout(poll, 3000);
               } else {
-                var csv = data.trim();
+                var csv = data.data.trim();
                 defer.resolve({'data': csv});
               }
+            },
+            function (data) {
+              console.log("Error:  " + JSON.stringify(data, null, 2));
             }
           )
         };
@@ -315,9 +332,9 @@ pacoApp.service('dataService', ['$http', '$timeout', '$q', 'config',
         endpoint += '&experimentGroupName=' + escape(group);
       }
 
-      $http.get(endpoint).success(
+      $http.get(endpoint).then(
         function(data) {
-
+					data =data.data; // deal with new wrapper
           if (!user) {
             var totalParticipantCount = 0;
 	          var todayParticipantCount = 0;
@@ -354,6 +371,9 @@ pacoApp.service('dataService', ['$http', '$timeout', '$q', 'config',
           defer.resolve({
             'data': data
           });
+        }, 
+        function (data) {
+          console.log("Error:  " + JSON.stringify(data, null, 2));
         });
 
       return defer.promise;
@@ -384,7 +404,7 @@ pacoApp.service('config', function() {
   ];
 
   this.dataDeclarations = {
-    1: 'App Usage and Browser History',
+    1: 'App Usage',
     2: 'Location Information',
     3: 'Phone Details (Make, Model, Carrier)',
     4: 'Apps installed on the phone',
@@ -397,19 +417,19 @@ pacoApp.service('config', function() {
   ];
 
   this.scheduleTypes = [
-    'Daily',
-    'Weekdays',
-    'Weekly',
-    'Monthly',
-    'Random sampling (ESM)'
+    { id : 0, name : "Daily" },
+    { id : 1, name : 'Weekdays' },
+    { id : 2, name : 'Weekly' },
+    { id : 3, name : 'Monthly' },
+    { id : 4, name : 'Random sampling (ESM)'}
   ];
 
-  this.actionTypes = {
-    1: 'Create notification to participate',
-    2: 'Create notification message',
-    // 3: 'Log data',
-    4: 'Execute script'
-  };
+  this.actionTypes = [
+    { id : 1, name: 'Create notification to participate'},
+    { id : 2, name : 'Create notification message'},
+    // { id : 3, name : 'Log data'},
+    { id : 4, name : 'Execute script'}
+  ];
 
   this.cueTypes = [
     'HANGUP (deprecated)',
@@ -432,13 +452,19 @@ pacoApp.service('config', function() {
     "App removed",
     "App installed",
     "Permission changed",
-    "View Clicked"
+    "View Clicked",
+    "Notification created", 
+    "Notification shade opened",
+    "Notification shade dismiss all",
+    "Notification shade dismiss notification",
+    "Notification shade closed",
+    "Notification tapped in shade"
   ];
 
   this.esmPeriods = [
-    'day',
-    'week',
-    'month'
+    'daily',
+    'weekly',
+    'monthly'
   ];
 
   this.weeksOfMonth = [
@@ -449,17 +475,16 @@ pacoApp.service('config', function() {
     'Fifth'
   ];
 
-  this.responseTypes = {
-    'likert': 'Scale',
-    'likert_smileys': '5 Point Smiley Scale',
-    'number': 'Number',
-    'open text': 'Open Text',
-    'list': 'List',
-    'photo': 'Photo',
-    'location': 'Location',
-    'audio': 'Audio'
-  };
-
+  this.responseTypes =[ 
+  {"id" : 'likert', "name" : 'Scale'},
+  {"id" : 'likert_smileys', "name" : '5 Point Smiley Scale'},
+  {"id" : 'number', "name" : 'Number'},
+  {"id" : 'open text', "name" : 'Open Text'},
+  {"id" : 'list', "name" : 'List'},
+  {"id" : 'photo', "name" : 'Photo'},
+  {"id" : 'location', "name" : 'Location'},
+  {"id" : 'audio', "name" : 'Audio'}];
+  
   this.feedbackTypes = [
     'Static Message',
     'Retrospective (QS default)',
@@ -518,7 +543,7 @@ pacoApp.service('template', function() {
       text: 'Thanks for Participating!',
     },
     rawDataAccess: true,
-    fixedDuration: 'false'
+    fixedDuration: false
   };
 
   this.experiment = {
@@ -544,6 +569,7 @@ pacoApp.service('template', function() {
 
   this.defaultAction = {
     type: 'pacoNotificationAction',
+    actionCode : 1,
     timeout: 15,
     color: 0,
     delay: 0,
@@ -574,14 +600,19 @@ pacoApp.service('template', function() {
   this.scheduleTrigger = {
     type: 'scheduleTrigger',
     actions: [this.defaultAction],
-    schedules: [this.schedule]
+    schedules: [this.defaultEsmSchedule]
   };
 
   this.eventTrigger = {
     type: 'interruptTrigger',
     actions: [this.defaultAction],
     cues: [this.cue],
-    minimumBuffer: 59
+    minimumBuffer: 59,
+    hasTimeWindow: false,
+    startTimeMillis: 9 * 60 * 60 * 1000,
+    endTimeMillis: 5 * 60 * 60 * 1000,
+    weekends: true
+    
   };
 
   this.signalTime = {
