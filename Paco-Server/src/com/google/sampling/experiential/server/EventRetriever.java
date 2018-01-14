@@ -39,6 +39,7 @@ import org.joda.time.DateTime;
 import org.joda.time.DateTimeZone;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -53,6 +54,7 @@ import com.google.appengine.api.datastore.PreparedQuery;
 import com.google.appengine.api.datastore.Query.FilterOperator;
 import com.google.appengine.api.datastore.Query.FilterPredicate;
 import com.google.appengine.api.datastore.QueryResultList;
+import com.google.appengine.api.modules.ModulesServiceFactory;
 import com.google.appengine.api.taskqueue.Queue;
 import com.google.appengine.api.taskqueue.QueueFactory;
 import com.google.appengine.api.taskqueue.TaskOptions;
@@ -84,7 +86,7 @@ public class EventRetriever {
   private static EventRetriever instance;
   private static final Logger log = Logger.getLogger(EventRetriever.class.getName());
   private static CloudSQLDao cloudSqlDaoImpl = new CloudSQLDaoImpl();
-  private static DateTimeFormatter df = DateTimeFormat.forPattern(TimeUtil.DATETIME_FORMAT).withOffsetParsed();
+  private static DateTimeFormatter dfMs = DateTimeFormat.forPattern(TimeUtil.DATETIME_FORMAT_MS).withOffsetParsed();
 
   @VisibleForTesting
   EventRetriever() {
@@ -156,6 +158,7 @@ public class EventRetriever {
     Event event = new Event(who, lat, lon, whenDate, appId, pacoVersion, what, shared, experimentId, experimentName,
                             experimentVersion, responseTime, scheduledTime, blobs, tz, groupName, actionTriggerId,
                             actionTriggerSpecId, actionId);
+
     // persistInCloudSql flag will determine which flow to go. Flow 1:persist in
     // data store and send event to the cloud sql queue
     // Flow 2: persist in cloud sql
@@ -165,19 +168,23 @@ public class EventRetriever {
         event.setPacoVersion(eventJson.getString("pacoVersion"));
         event.setAppId(eventJson.getString("appId"));
         event.setTimeZone(eventJson.getString("tz"));
-        event.setWhen(df.parseDateTime(eventJson.getString("whenDate")).toDate());
+        event.setWhen(dfMs.parseDateTime(eventJson.getString("whenDate")).toDate());
         event.setWho(eventJson.getString("who"));
-        cloudSqlDaoImpl.insertEvent(event);
+        cloudSqlDaoImpl.insertEventAndOutputs(event);
       } catch (JSONException e) {
-        log.info(ErrorMessages.JSON_EXCEPTION + " for request: " + eventJson + e);
+        cloudSqlDaoImpl.insertFailedEvent(eventJson.toString(), ErrorMessages.JSON_EXCEPTION.getDescription(), e.getMessage());
+        log.warning(ErrorMessages.JSON_EXCEPTION.getDescription() + " for request: " + eventJson + " : " + ExceptionUtil.getStackTraceAsString(e));
       } catch (SQLException sqle) {
-        log.info(ErrorMessages.SQL_INSERT_EXCEPTION + " for  request: " + eventJson + sqle);
+        cloudSqlDaoImpl.insertFailedEvent(eventJson.toString(), ErrorMessages.SQL_INSERT_EXCEPTION.getDescription(), sqle.getMessage());
+        log.warning(ErrorMessages.SQL_INSERT_EXCEPTION.getDescription() + " for  request: " + eventJson + " : " + ExceptionUtil.getStackTraceAsString(sqle));
       } catch (ParseException e) {
-        log.info(ErrorMessages.TEXT_PARSE_EXCEPTION + "for request: " +eventJson + e);
+        cloudSqlDaoImpl.insertFailedEvent(eventJson.toString(), ErrorMessages.TEXT_PARSE_EXCEPTION.getDescription(), e.getMessage());
+        log.warning(ErrorMessages.TEXT_PARSE_EXCEPTION.getDescription() + " for request: " + eventJson + " : " + ExceptionUtil.getStackTraceAsString(e));
+      } catch (Exception e) {
+        cloudSqlDaoImpl.insertFailedEvent(eventJson.toString(), ErrorMessages.GENERAL_EXCEPTION.getDescription(), e.getMessage());
+        log.warning(ErrorMessages.GENERAL_EXCEPTION.getDescription() + " for request: " + eventJson + " : " + ExceptionUtil.getStackTraceAsString(e));
       }
-
     } else {
-
       Transaction tx = null;
       try {
         tx = pm.currentTransaction();
@@ -189,7 +196,8 @@ public class EventRetriever {
         } else if (!isScheduleEvent && !isStopEvent) {
           new ParticipationStatsService().updateResponseCountWithEvent(event);
         }
-        sendToCloudSqlQueue(eventJson, event);
+        replaceEachBlobInJsonWithTheWordBlob(eventJson, event);
+//        sendToCloudSqlQueue(eventJson, event);
         tx.commit();
         log.info("Event saved in datastore");
       } finally {
@@ -202,8 +210,48 @@ public class EventRetriever {
     }
   }
 
+  /**
+   * A destructive method to replace blobs with the word "blob" so as not to
+   * crash the task queue which has a 100k limit on task payload size.
+   *
+   * We will query for image and audio blob data in a different way.
+   *
+   * @param eventJson
+   * @param event
+   */
+  private void replaceEachBlobInJsonWithTheWordBlob(JSONObject eventJson, Event event) {
+    List<PhotoBlob> blobs = event.getBlobs();
+    if (blobs == null || blobs.isEmpty()) {
+      return;
+    }
+
+    if (!eventJson.has("responses")) {
+      log.warning("We have blobs but no responses in an event: " + event.getId());
+      return;
+    }
+
+    try {
+      JSONArray responses = eventJson.getJSONArray("responses");
+
+      for (PhotoBlob photoBlob : blobs) {
+        String blobName = photoBlob.getName();
+
+        for (int i = 0; i < responses.length(); i++) {
+          JSONObject response = responses.getJSONObject(i);
+          if (response.has("name") && response.get("name").equals(blobName)) {
+            response.put("answer", "blob");
+            break;
+          }
+        }
+      }
+    } catch (JSONException e) {
+      log.severe("JSON Exception on event: " + event.getId() + ". " + e.getMessage());
+    }
+
+  }
+
   public void sendToCloudSqlQueue(JSONObject eventJson, Event event) {
-    DateTimeFormatter fmt = DateTimeFormat.forPattern(TimeUtil.DATETIME_FORMAT);
+    DateTimeFormatter fmt = DateTimeFormat.forPattern(TimeUtil.DATETIME_FORMAT_MS);
     Queue queue = QueueFactory.getQueue("cloud-sql");
     try {
       // In the flow of saving event data to data store, pacoversion and appid
@@ -220,7 +268,12 @@ public class EventRetriever {
     } catch (JSONException e) {
       log.severe("while sending to cloud sql queue" + e);
     }
-    queue.add(TaskOptions.Builder.withUrl("/csInsert").payload(eventJson.toString()));
+    TaskOptions to = TaskOptions.Builder.withUrl("/csInsert").payload(eventJson.toString());
+    if (EnvironmentUtil.isDevInstance()) {
+      queue.add(to.header("Host", ModulesServiceFactory.getModulesService().getVersionHostname("mapreduce", null)));
+    } else {
+      queue.add(to);
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -228,7 +281,7 @@ public class EventRetriever {
     PersistenceManager pm = PMF.get().getPersistenceManager();
     Query q = pm.newQuery(Event.class);
     q.setOrdering("when desc");
-    q.setFilter("who = whoParam");
+    q.setFilter("who == whoParam");
     q.declareParameters("String whoParam");
     long t11 = System.currentTimeMillis();
     List<Event> events = (List<Event>) q.execute(loggedInUser);
@@ -615,10 +668,10 @@ public class EventRetriever {
     List<EventDAO> eventDAOs = Lists.newArrayList();
 
     for (Event event : result) {
-      eventDAOs.add(new EventDAO(event.getWho(), event.getWhen(), event.getExperimentName(), event.getLat(),
+      eventDAOs.add(new EventDAO(event.getWho(), new DateTime(event.getWhen()), event.getExperimentName(), event.getLat(),
                                  event.getLon(), event.getAppId(), event.getPacoVersion(),
-                                 convertToWhatDAOs(event.getWhat()), event.isShared(), event.getResponseTime(),
-                                 event.getScheduledTime(), toBase64StringArray(event.getBlobs()),
+                                 convertToWhatDAOs(event.getWhat()), event.isShared(), event.getResponseTimeWithTimeZone(event.getTimeZone()),
+                                 event.getScheduledTimeWithTimeZone(event.getTimeZone()), toBase64StringArray(event.getBlobs()),
                                  Long.parseLong(event.getExperimentId()), event.getExperimentVersion(),
                                  event.getTimeZone(), event.getExperimentGroupName(), event.getActionTriggerId(),
                                  event.getActionTriggerSpecId(), event.getActionId()));

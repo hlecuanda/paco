@@ -13,6 +13,7 @@ import net.sf.jsqlparser.expression.Expression;
 import net.sf.jsqlparser.parser.CCJSqlParserUtil;
 import net.sf.jsqlparser.schema.Table;
 import net.sf.jsqlparser.statement.select.AllColumns;
+import net.sf.jsqlparser.statement.select.Distinct;
 import net.sf.jsqlparser.statement.select.FromItem;
 import net.sf.jsqlparser.statement.select.Join;
 import net.sf.jsqlparser.statement.select.Limit;
@@ -37,19 +38,26 @@ public class SearchUtil {
     List<Expression> groupBy = null;
     Limit limit = null;
     boolean allCol = false;
+    boolean isDistinct = false;
     SelectItem star = new AllColumns();
     // projection
-    if (sqlQuery.getProjection() != null) {
-      for(String eachItem : sqlQuery.getProjection()) {
-        if (Constants.STAR.equals(eachItem)) {
+    String[] projections = sqlQuery.getProjection();
+    if (projections != null) {
+      for(int s = 0; s < projections.length; s++) {
+        if (Constants.STAR.equals(projections[s])) {
           allCol = true;
           break;
-        } 
+        } else if (projections[s].equalsIgnoreCase(Constants.WHEN)) {
+          projections[s] = Constants.WHEN_WITH_BACKTICK;
+        } else if(projections[s].toLowerCase().startsWith(Constants.DISTINCT)) {
+          isDistinct = true;
+          projections[s] = projections[s].replace(Constants.DISTINCT, "").trim();
+        }
       }
       if (allCol) {
         selQry = SelectUtils.buildSelectFromTableAndSelectItems(new Table(EventBaseColumns.TABLE_NAME), star);
       } else {
-        selQry = SelectUtils.buildSelectFromTableAndExpressions(new Table(EventBaseColumns.TABLE_NAME), sqlQuery.getProjection());  
+        selQry = SelectUtils.buildSelectFromTableAndExpressions(new Table(EventBaseColumns.TABLE_NAME), projections);  
       }
     }
 
@@ -62,6 +70,7 @@ public class SearchUtil {
       while (tempWhereClause.contains("?")) {
         tempWhereClause = tempWhereClause.replaceFirst("\\?", repl[i++]);
       }
+      tempWhereClause = tempWhereClause.replaceAll(Constants.WHEN, Constants.WHEN_WITH_BACKTICK);
       whereExpr = CCJSqlParserUtil.parseCondExpression(tempWhereClause);
     }
 
@@ -90,6 +99,10 @@ public class SearchUtil {
     }
 
     PlainSelect plainSel = (PlainSelect) selQry.getSelectBody();
+    if (isDistinct) { 
+      Distinct dt = new Distinct();
+      plainSel.setDistinct(dt);
+    }
     plainSel.setWhere(whereExpr);
     plainSel.setOrderByElements(orderByList);
     plainSel.setGroupByColumnReferences(groupBy);
@@ -97,15 +110,21 @@ public class SearchUtil {
 
     return plainSel.toString();
   }
-
-  public static void addJoinClause(Select selStatement) throws JSQLParserException {
+  
+  public static void addOutputJoinClause(Select selStatement) throws JSQLParserException {
     PlainSelect ps = null;
     Expression joinExp = null;
-    List<Join> jList = Lists.newArrayList();
+    List<Join> jList = null;
     Join joinObj = new Join();
+    ps = ((PlainSelect) selStatement.getSelectBody());
+    if (ps.getJoins() == null) { 
+      jList = Lists.newArrayList();
+    } else {
+      jList = ps.getJoins();
+    }
     FromItem ft = new Table(OutputBaseColumns.TABLE_NAME); 
     try {
-      joinExp = CCJSqlParserUtil.parseCondExpression(Constants.ID+ " = " +OutputBaseColumns.TABLE_NAME+ "."+OutputBaseColumns.EVENT_ID);
+      joinExp = CCJSqlParserUtil.parseCondExpression(Constants.UNDERSCORE_ID+ " = " +OutputBaseColumns.TABLE_NAME+ "."+OutputBaseColumns.EVENT_ID);
     } catch (JSQLParserException e) {
       e.printStackTrace();
     }
@@ -113,25 +132,36 @@ public class SearchUtil {
     joinObj.setInner(true);
     joinObj.setRightItem(ft);
     jList.add(joinObj);
-    ps = ((PlainSelect) selStatement.getSelectBody());
     ps.setJoins(jList);
   }
-  
 
   public static List<OrderByElement> convertToOrderByList(String inp) throws JSQLParserException {
     List<OrderByElement> orderByList = Lists.newArrayList();
+    OrderByElement  addOnWhenOrderBy = new OrderByElement();
     if (inp != null) {
       String[] inpAry = inp.split(",");
       for (String s : inpAry) {
+        if (s.contains(Constants.WHEN)) {
+          s = s.replace(Constants.WHEN, Constants.WHEN_WITH_BACKTICK);
+        }
         OrderByElement ob = new OrderByElement();
         String[] nameOrder = s.trim().split(" ");
         if (nameOrder.length > 1) {
           ob.setAscDescPresent(true);
           ob.setAsc(nameOrder[1].equalsIgnoreCase(Constants.ASC));
         }
+       
         Expression exp = CCJSqlParserUtil.parseExpression(s);
         ob.setExpression(exp);
         orderByList.add(ob);
+        
+        if (s.contains(Constants.WHEN)) {
+          Expression addOnWhenexp = CCJSqlParserUtil.parseExpression(Constants.WHEN_FRAC_SEC);
+          addOnWhenOrderBy.setAscDescPresent(true);
+          addOnWhenOrderBy.setAsc(ob.isAsc());
+          addOnWhenOrderBy.setExpression(addOnWhenexp);
+          orderByList.add(addOnWhenOrderBy);
+        }
       }
     }
     return orderByList;
@@ -142,10 +172,21 @@ public class SearchUtil {
     Expression expr = null;
     String[] gCol = s.split(",");
     for (String str : gCol) {
+      if (Constants.WHEN.equalsIgnoreCase(str.trim())) {
+        str = Constants.WHEN_WITH_BACKTICK;
+      }
       expr = CCJSqlParserUtil.parseExpression(str.trim());
       expLst.add(expr);
     }
     return expLst;
+  }
+  
+  public static String getQueryForEventRetrieval(String eventId) throws JSQLParserException, Exception { 
+    SQLQuery.Builder sqlBldr = new SQLQuery.Builder();
+    sqlBldr.criteriaQuery(Constants.UNDERSCORE_ID + "=?").criteriaValues(new String[]{eventId});
+    String plainSql = getPlainSql(sqlBldr.buildWithDefaultValues());
+    Select clientJsqlStatement = getJsqlSelectStatement(plainSql);
+    return clientJsqlStatement.toString();
   }
 
 }

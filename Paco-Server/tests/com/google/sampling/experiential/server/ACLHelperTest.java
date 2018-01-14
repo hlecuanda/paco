@@ -3,10 +3,12 @@ package com.google.sampling.experiential.server;
 import java.util.ArrayList;
 import java.util.Map;
 
+import org.joda.time.DateTimeZone;
 import org.junit.Before;
 import org.junit.Test;
 
 import com.google.common.collect.Maps;
+import com.google.sampling.experiential.datastore.EventServerColumns;
 import com.pacoapp.paco.shared.model2.EventBaseColumns;
 import com.pacoapp.paco.shared.model2.OutputBaseColumns;
 import com.pacoapp.paco.shared.util.QueryPreprocessor;
@@ -25,6 +27,9 @@ public class ACLHelperTest extends TestCase {
   ArrayList<Long> expListinDBForParticipant = new ArrayList<Long>();
   private static Map<String, Class> validColumnNamesDataTypeInDb = Maps.newHashMap();
   private static final String ID = "_id";
+  private DateTimeZone dtz = DateTimeZone.forID("America/Los_Angeles");
+  ArrayList<String> reqDateColumns = null;
+  private boolean webRequest = false;
 
   // User 'admin1' is an admin of expts expt 1,2,3
   // S1 : no exp id clause, no who clause
@@ -97,7 +102,7 @@ public class ACLHelperTest extends TestCase {
   public void testS1() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS1Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS1Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -109,7 +114,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS2Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS2Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
       assertTrue(expectedS2Qry.equalsIgnoreCase(actualQuery));
     } catch (Exception e) {
@@ -121,7 +126,7 @@ public class ACLHelperTest extends TestCase {
   public void testS3() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS3Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS3Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -132,7 +137,7 @@ public class ACLHelperTest extends TestCase {
   public void testS4() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS4Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS4Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -143,7 +148,7 @@ public class ACLHelperTest extends TestCase {
   public void testS5a() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS5aQry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS5aQry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -154,7 +159,7 @@ public class ACLHelperTest extends TestCase {
   public void testS5b() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS5bQry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS5bQry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -165,7 +170,7 @@ public class ACLHelperTest extends TestCase {
   public void testS6() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS6Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS6Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -177,7 +182,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS7Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS7Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
       assertTrue(actualQuery.equalsIgnoreCase(expectedS7Qry));
     } catch (Exception e) {
@@ -190,7 +195,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS8aQry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS8aQry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -202,7 +207,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS9Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS9Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
       assertTrue(actualQuery.equalsIgnoreCase(expectedS9Qry));
     } catch (Exception e) {
@@ -215,7 +220,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS10Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS10Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
       assertTrue(actualQuery.equalsIgnoreCase(expectedS10Qry));
     } catch (Exception e) {
@@ -227,7 +232,7 @@ public class ACLHelperTest extends TestCase {
   public void testS11() {
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS11Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       ACLHelper.getModifiedQueryBasedOnACL(actualS11Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
     } catch (Exception e) {
       assertTrue(e.getMessage().startsWith("Unauthorized access"));
@@ -239,7 +244,7 @@ public class ACLHelperTest extends TestCase {
     String actualQuery;
     try {
       Select selStmt = SearchUtil.getJsqlSelectStatement(actualS12Qry);
-      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, false, null, "-7:00");
+      QueryPreprocessor qp = new QueryPreprocessor(selStmt, validColumnNamesDataTypeInDb, webRequest, reqDateColumns);
       actualQuery = ACLHelper.getModifiedQueryBasedOnACL(actualS12Qry, userWhoIsAdmin, expListinDBForAdmin, qp);
       assertTrue(actualQuery.equalsIgnoreCase(expectedS12Qry));
     } catch (Exception e) {
@@ -249,16 +254,6 @@ public class ACLHelperTest extends TestCase {
 
   @Before
   public void setUp() {
-    // Initial set up
-    // Expt 1,2,3,4
-    // Admin is admin1
-    // Participant is participant1, participant2, participant3 for all expt 1 2
-    // 3 4
-    // Participant p4
-    // Admin admin1 is admin and participant of Expt 1, 2, 3
-    // public QueryPreprocessor(Select select, boolean modifyDateToUTC,
-    // List<String> reqDateColNames, Map<String, Class>validColumnNames, String
-    // inpTimeZone) {
 
     userInHttpRequest = "admin1";
     userWhoIsAdmin = "admin1";
@@ -277,7 +272,6 @@ public class ACLHelperTest extends TestCase {
       validColumnNamesDataTypeInDb.put(ID, LongValue.class);
 
       validColumnNamesDataTypeInDb.put(EventBaseColumns.EXPERIMENT_ID, LongValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.EXPERIMENT_SERVER_ID, StringValue.class);
       validColumnNamesDataTypeInDb.put(EventBaseColumns.EXPERIMENT_NAME, StringValue.class);
       validColumnNamesDataTypeInDb.put(EventBaseColumns.EXPERIMENT_VERSION, LongValue.class);
       validColumnNamesDataTypeInDb.put(EventBaseColumns.SCHEDULE_TIME, StringValue.class);
@@ -288,14 +282,14 @@ public class ACLHelperTest extends TestCase {
       validColumnNamesDataTypeInDb.put(EventBaseColumns.ACTION_TRIGGER_SPEC_ID, LongValue.class);
       validColumnNamesDataTypeInDb.put(EventBaseColumns.ACTION_ID, LongValue.class);
 
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.WHO, StringValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.WHEN, StringValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.PACO_VERSION, LongValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.APP_ID, StringValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.JOINED, LongValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.WHO, StringValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.WHEN, StringValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.PACO_VERSION, LongValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.APP_ID, StringValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.JOINED, LongValue.class);
 
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.SORT_DATE, StringValue.class);
-      validColumnNamesDataTypeInDb.put(EventBaseColumns.CLIENT_TIME_ZONE, StringValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.SORT_DATE, StringValue.class);
+      validColumnNamesDataTypeInDb.put(EventServerColumns.CLIENT_TIME_ZONE, StringValue.class);
       validColumnNamesDataTypeInDb.put(OutputBaseColumns.NAME, StringValue.class);
       validColumnNamesDataTypeInDb.put(OutputBaseColumns.ANSWER, StringValue.class);
     }

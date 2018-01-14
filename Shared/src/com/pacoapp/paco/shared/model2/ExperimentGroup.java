@@ -39,6 +39,8 @@ public class ExperimentGroup extends ModelBase implements Validatable, java.io.S
 
   private Boolean rawDataAccess = true;
 
+  private boolean logNotificationEvents = false;
+
   public ExperimentGroup() {
     super();
     this.actionTriggers = new ArrayList<ActionTrigger>();
@@ -226,10 +228,9 @@ public class ExperimentGroup extends ModelBase implements Validatable, java.io.S
       return;
     }
     for (Input2 input : inputs) {
-      // TODO commenting this out for now because one experimentor uses the same name cleverly but under conditionals that are mutually exclusive.
-//      if (!inputNames.add(input.getName())) {
-//        validator.addError("Input name: " + input.getName() + " is duplicate. All input names within a group must be unique");
-//      }
+      if (!inputNames.add(input.getName())) {
+        validator.addError("Input name: " + input.getName() + " is duplicate. All input names within a group must be unique");
+      }
       input.validateWith(validator);
     }
   }
@@ -282,5 +283,14 @@ public class ExperimentGroup extends ModelBase implements Validatable, java.io.S
     this.rawDataAccess = rawDataAccess;
   }
 
+
+
+  public Boolean getLogNotificationEvents() {
+    return this.logNotificationEvents;
+  }
+
+  public void setLogNotificationEvents(Boolean shouldLog) {
+    this.logNotificationEvents = shouldLog;
+  }
 
 }

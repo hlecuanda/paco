@@ -1,9 +1,9 @@
 package com.pacoapp.paco.shared.model2;
 
+import com.pacoapp.paco.shared.util.Constants;
+
 //POJO to hold the different parts of the SQL query
 public class SQLQuery {
-  private static final String DESC = " desc";
-  private static final String ID = "_id";
 
   String[] projection;
   String criteriaQuery;
@@ -12,6 +12,7 @@ public class SQLQuery {
   String having;
   String sortOrder;
   String limit;
+  Boolean fullEventAndOutputs;
 
   public SQLQuery(Builder b) {
     this.projection = b.projection;
@@ -21,6 +22,7 @@ public class SQLQuery {
     this.having = b.having;
     this.limit = b.limit;
     this.sortOrder = b.sortOrder;
+    this.fullEventAndOutputs = b.fullEventAndOutputs;
   }
 
   public String[] getProjection() {
@@ -51,6 +53,17 @@ public class SQLQuery {
     return limit;
   }
 
+  public Boolean isFullEventAndOutputs() {
+    return fullEventAndOutputs;
+  }
+
+  public void addClientTzToProjection(){
+    String[] modArr = new String[projection.length+1];
+    System.arraycopy(projection, 0, modArr, 0, projection.length);
+    modArr[projection.length] = Constants.CLIENT_TIMEZONE;
+    this.projection = modArr;
+  }
+
   public static class Builder {
     private String[] projection;
     private String criteriaQuery;
@@ -59,10 +72,11 @@ public class SQLQuery {
     private String having;
     private String sortOrder;
     private String limit;
+    private Boolean fullEventAndOutputs;
 
-    public Builder(String[] projection) {
-
+    public Builder projection(String[] projection) {
       this.projection = projection;
+      return this;
     }
 
     public Builder criteriaQuery(String criQuery) {
@@ -95,26 +109,34 @@ public class SQLQuery {
       return this;
     }
 
+    public Builder fullEventAndOutputs(Boolean fullEventAndOutputs) {
+      this.fullEventAndOutputs = fullEventAndOutputs;
+      return this;
+    }
+
     private Builder addDefaultValues(SQLQuery obj) {
-      // provide default sort order which is Event._Id desc
-      if (obj.sortOrder == null) {
-        obj.sortOrder = EventBaseColumns.TABLE_NAME+"."+ID.concat(DESC);
+
+      // default projection is *
+      if (obj.getProjection() == null) {
+        obj.projection = new String[] { Constants.STAR };
+        obj.fullEventAndOutputs = true;
+      }
+      // find if there is a distinct clause
+      boolean isDistinct = false;
+      for(String s : obj.getProjection()) {
+        if (s.startsWith(Constants.DISTINCT)) {
+          isDistinct = true;
+          break;
+        }
       }
 
-      if (obj.getProjection() == null) {
-        obj.projection = new String[] { "*" };
-      } else {
-
-        // adding a default projection of event table primary key column
-        int crtLength = obj.getProjection().length;
-  
-        String[] modifiedProjection = new String[crtLength + 1];
-        System.arraycopy(obj.getProjection(), 0, modifiedProjection, 0, crtLength);
-        // adding the following columns in the projection list to help in
-        // coalescing
-        modifiedProjection[crtLength] = EventBaseColumns.TABLE_NAME+"." + ID;
-        obj.projection = modifiedProjection;
-      }  
+      // provide default sort order which is Event._Id desc
+      // but do not provide default ordering under the following conditions
+      // 1.when the user specifies a group by value, in this case when we add default ordering on _id, sql complains order by column _id should be part of group by
+      // 2.distinct query, in this case when we add default ordering on _id, sql complains order by column _id should be part of select list
+      if (obj.getGroupBy() == null && !isDistinct && obj.sortOrder == null) {
+        obj.sortOrder = EventBaseColumns.TABLE_NAME + "." + Constants.UNDERSCORE_ID.concat(Constants.BLANK).concat(Constants.DESC);
+      }
       return this;
     }
 

@@ -14,6 +14,8 @@ import org.apache.commons.pool.KeyedObjectPoolFactory;
 import org.apache.commons.pool.impl.GenericKeyedObjectPoolFactory;
 import org.apache.commons.pool.impl.GenericObjectPool;
 
+import com.pacoapp.paco.shared.util.ErrorMessages;
+
 public class CloudSQLConnectionManager {
   public static final Logger log = Logger.getLogger(CloudSQLConnectionManager.class.getName());
 
@@ -31,9 +33,11 @@ public class CloudSQLConnectionManager {
         ds = setUp();
         instance = new CloudSQLConnectionManager();
       } catch (ClassNotFoundException e) {
-        throw new SQLException("DataSourceSetUp", e);
+        log.warning( ErrorMessages.DATASOURCE_SETUP_EXCEPTION.getDescription() + e.getMessage());
+        throw new SQLException(ErrorMessages.DATASOURCE_SETUP_EXCEPTION.getDescription(), e);
       } catch (Exception ex) {
-        throw new SQLException("DataSourceSetUp", ex);
+        log.warning(ErrorMessages.GENERAL_EXCEPTION.getDescription() + ex.getMessage());
+        throw new SQLException(ErrorMessages.GENERAL_EXCEPTION.getDescription(), ex);
       }
     }
     return instance;
@@ -41,6 +45,7 @@ public class CloudSQLConnectionManager {
 
   public Connection getConnection() throws SQLException {
     Connection conn = ds.getConnection();
+    conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
     return conn;
   }
 
@@ -54,11 +59,14 @@ public class CloudSQLConnectionManager {
     try {
       int maxConnections = Integer.parseInt(System.getProperty("ae-connection-pool.maxconn"));
       connectionPool.setMaxActive(maxConnections);
+      connectionPool.setMaxIdle(maxConnections);
+      connectionPool.setTestWhileIdle(true);
+      connectionPool.setTestOnBorrow(true);
     } catch (NumberFormatException nfe) {
       throw new Exception("Max connections not set to Integer in config file.");
     }
 
-    if (System.getProperty("com.google.appengine.runtime.version").startsWith("Google App Engine/")) {
+    if (!EnvironmentUtil.isDevInstance()) {
       url = System.getProperty("ae-cloudsql.database-url");
       userName = System.getProperty("ae-cloudsql.database-username");
       password = System.getProperty("ae-cloudsql.database-password");
@@ -71,7 +79,7 @@ public class CloudSQLConnectionManager {
     KeyedObjectPoolFactory kopf = new GenericKeyedObjectPoolFactory(null);
 
     ConnectionFactory cf = new DriverManagerConnectionFactory(url, userName, password);
-    PoolableConnectionFactory pcf = new PoolableConnectionFactory(cf, connectionPool, kopf, null, false, true);
+    PoolableConnectionFactory pcf = new PoolableConnectionFactory(cf, connectionPool, kopf, "select 1", false, true);
     ds = new PoolingDataSource(connectionPool);
     return ds;
   }
@@ -82,6 +90,5 @@ public class CloudSQLConnectionManager {
 
   static void currentPoolStatus() {
     log.info("Max = " + getConnectionPool().getMaxActive() + " : " + "Active = " + getConnectionPool().getNumActive());
-
   }
 }
